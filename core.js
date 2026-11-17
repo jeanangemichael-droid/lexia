@@ -5,9 +5,11 @@ import { complete } from './llm.js';
 import { Pseudonymizer } from './privacy.js';
 import { Index } from './search.js';
 import { esc, readDocx, readOdt } from './office.js';
+import { ARTIFACT, cap } from './platform.js';
+export { ARTIFACT, cap };
 
 export const V = new Vault();
-export const S = { route:'chat', param:null, idx:null, idxDirty:true };
+export const S = { route:'chat', param:null, idx:null, idxDirty:true, hash:'' };
 export { esc, uid };
 
 // ——————————————————————————————————— Icônes (SVG en ligne)
@@ -80,11 +82,14 @@ export const agentById = id => AGENTS.find(a => a.id === id) || AGENTS[0];
 export const avatar = (a, size = 28) => `<span class="av" style="background:${a.color};width:${size}px;height:${size}px">${esc(a.name.slice(0,2).toUpperCase())}</span>`;
 
 // ——————————————————————————————————— Paramètres
-export const DEFAULTS = { id:'main', endpoint:'direct', apiKey:'', proxyUrl:'', proxyToken:'', model:'claude-sonnet-5-5', modelDeep:'claude-opus-5-5', modelFast:'claude-haiku-5-5',
+export const DEFAULTS = { id:'main', endpoint: ARTIFACT ? 'claude' : 'direct', apiKey:'', proxyUrl:'', proxyToken:'', model:'claude-sonnet-5-5', modelDeep:'claude-opus-5-5', modelFast:'claude-haiku-5-5',
   maxTokens:8000, autolock:5, pseudo:true, pdfAsText:true, autoIndex:true, confTerms:'', theme:'dark', priceIn:3, priceOut:15,
   cabinet:{ name:'', address:'', style:'', font:'Times New Roman' }, opts:{ corpus:true, verify:false, web:false, webOfficial:true, thinking:false, deep:false }, docNum:0, lastBench:0 };
 export function settings(){ const s = V.get('settings','main'); return s ? { ...DEFAULTS, ...s, cabinet:{ ...DEFAULTS.cabinet, ...(s.cabinet||{}) }, opts:{ ...DEFAULTS.opts, ...(s.opts||{}) } } : { ...DEFAULTS }; }
 export async function saveSettings(patch){ const s = { ...settings(), ...patch }; await V.put('settings', s); return s; }
+
+export const engineReady = (st = settings()) => st.endpoint === 'claude' ? ARTIFACT : st.endpoint === 'proxy' ? true : !!st.apiKey;
+export const engineHint = () => ARTIFACT ? 'Le moteur IA n\'est pas configuré : ouvrez Paramètres et sécurité → Moteur d\'IA.' : 'Configurez votre clé API dans Paramètres et sécurité → Moteur d\'IA.';
 
 export async function seedIfEmpty(){
   if (!V.get('settings','main')) await V.put('settings', { ...DEFAULTS });
@@ -118,7 +123,11 @@ export async function importFiles(files, { dossierId = null, onDone } = {}){
       const doc = { title:name.replace(/\.[^.]+$/, ''), file:name, mime, size:f.size, dossierId, tags:[], created:Date.now(), text:'', kind:'text' };
       if (ext === 'docx') doc.text = await readDocx(await f.arrayBuffer());
       else if (ext === 'odt') doc.text = await readOdt(await f.arrayBuffer());
-      else if (ext === 'pdf' || mime === 'application/pdf') { doc.kind = 'pdf'; doc.mime = 'application/pdf'; }
+      else if (ext === 'pdf' || mime === 'application/pdf') {
+        doc.kind = 'pdf'; doc.mime = 'application/pdf';
+        try { const r = await pdfText(await f.arrayBuffer()); if (r.text.replace(/\s/g, '').length > 60 * r.pages) { doc.text = r.text; doc.indexed = true; doc.textSource = 'local'; } doc.pages = r.pages; }
+        catch (e) { console.warn('Lecture PDF locale impossible', e); }
+      }
       else if (mime.startsWith('image/')) { doc.kind = 'image'; }
       else if (['txt','md','csv','json','xml','rtf'].includes(ext) || mime.startsWith('text/')) doc.text = await f.text();
       else if (['html','htm'].includes(ext)) doc.text = new DOMParser().parseFromString(await f.text(), 'text/html').body.textContent;
@@ -131,7 +140,7 @@ export async function importFiles(files, { dossierId = null, onDone } = {}){
     } catch (e) { toast(`Échec d'import de ${f.name} : ${e.message}`, 'err'); }
   }
   await saveSettings({ docNum:num }); S.idxDirty = true;
-  if (st.autoIndex && (st.apiKey || st.endpoint === 'proxy')) for (const d of out.filter(d => d.kind !== 'text')) transcribe(d).then(() => onDone?.()).catch(e => toast(`Indexation de « ${d.title} » : ${e.message}`, 'err'));
+  if (st.autoIndex && engineReady(st)) for (const d of out.filter(d => d.kind !== 'text' && !d.text)) transcribe(d).then(() => onDone?.()).catch(e => toast(`Indexation de « ${d.title} » : ${e.message}`, 'err'));
   onDone?.();
   return out;
 }
@@ -139,15 +148,61 @@ export async function importFiles(files, { dossierId = null, onDone } = {}){
 // Transcription intégrale (OCR) des PDF et photos pour la recherche plein texte et la pseudonymisation
 export async function transcribe(doc){
   const blob = await V.getBlob(doc.id); if (!blob) throw new Error('fichier introuvable');
-  const st = settings(); toast(`Indexation IA de « ${doc.title} » en cours…`);
-  const block = doc.kind === 'pdf' ? { type:'document', source:{ type:'base64', media_type:'application/pdf', data:blob.b } } : { type:'image', source:{ type:'base64', media_type:blob.m || 'image/jpeg', data:blob.b } };
-  const r = await complete({ settings:st, model:st.modelFast, maxTokens:16000, system:'Tu es un outil d\'OCR juridique. Transcris intégralement et fidèlement le texte du document fourni, page après page, en conservant titres, numérotation des articles, montants et dates. Aucune reformulation, aucun commentaire. Indique [illisible] pour un passage illisible et « --- page n --- » entre les pages.',
-    messages:[{ role:'user', content:[block, { type:'text', text:'Transcription intégrale :' }] }] });
-  await logUsage(r.usage, st.modelFast);
+  const st = settings(); toast(`Indexation de « ${doc.title} » en cours…`);
+  const OCR = 'Tu es un outil d\'OCR juridique. Transcris intégralement et fidèlement le texte du document fourni, page après page, en conservant titres, numérotation des articles, montants et dates. Aucune reformulation, aucun commentaire. Indique [illisible] pour un passage illisible et « --- page n --- » entre les pages.';
+  const model = st.endpoint === 'claude' ? st.model : st.modelFast;
+  let text = '', usage = { in:0, out:0 };
+  if (doc.kind === 'pdf') {
+    const bytes = b64.dec(blob.b);
+    const loc = await pdfText(bytes.slice().buffer).catch(() => null);
+    if (loc && loc.text.replace(/\s/g, '').length > 60 * loc.pages) text = loc.text;
+    else if (st.endpoint === 'claude') {
+      // Mode abonnement : les pages sont converties en images puis transcrites par lots
+      const pages = await pdfImages(bytes.slice().buffer, 40);
+      const lim = await (await cap('sample'))?.limits().catch(() => null); const per = Math.max(1, lim?.images?.maxCount || 5);
+      for (let i = 0; i < pages.length; i += per) {
+        const batch = pages.slice(i, i + per);
+        const r = await complete({ settings:st, model, maxTokens:16000, system:OCR, messages:[{ role:'user', content:[...batch.map(b => ({ type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b } })), { type:'text', text:`Pages ${i + 1} à ${i + batch.length} : transcription intégrale.` }] }] });
+        text += (text ? '\n\n' : '') + r.text; usage.in += r.usage.in; usage.out += r.usage.out;
+      }
+    } else {
+      const r = await complete({ settings:st, model, maxTokens:16000, system:OCR, messages:[{ role:'user', content:[{ type:'document', source:{ type:'base64', media_type:'application/pdf', data:blob.b } }, { type:'text', text:'Transcription intégrale :' }] }] });
+      text = r.text; usage = r.usage;
+    }
+  } else {
+    const r = await complete({ settings:st, model, maxTokens:16000, system:OCR, messages:[{ role:'user', content:[{ type:'image', source:{ type:'base64', media_type:blob.m || 'image/jpeg', data:blob.b } }, { type:'text', text:'Transcription intégrale :' }] }] });
+    text = r.text; usage = r.usage;
+  }
+  if (usage.in || usage.out) await logUsage(usage, model);
   const d = V.get('docs', doc.id); if (!d) return;
-  d.text = r.text; d.indexed = true; await V.put('docs', d); S.idxDirty = true;
-  await audit('Indexation IA', `DOC ${d.num} · ${r.usage.in}+${r.usage.out} jetons`);
+  d.text = text; d.indexed = true; await V.put('docs', d); S.idxDirty = true;
+  await audit('Indexation', `DOC ${d.num} · ${usage.in}+${usage.out} jetons`);
   toast(`« ${d.title} » indexé : recherche plein texte disponible`, 'ok');
+}
+
+// ——————————————————————————————————— Lecture locale des PDF (pdf.js, aucun envoi)
+let pdfjs = null;
+async function pdfLib(){
+  if (!pdfjs) { pdfjs = await import('./pdf.min.js'); pdfjs.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.js', import.meta.url).href; }
+  return pdfjs;
+}
+export async function pdfText(buf){
+  const lib = await pdfLib(); const pdf = await lib.getDocument({ data:new Uint8Array(buf), isEvalSupported:false }).promise; let out = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const c = await (await pdf.getPage(i)).getTextContent();
+    out += (i > 1 ? `\n\n--- page ${i} ---\n` : '') + c.items.map(it => (it.str || '') + (it.hasEOL ? '\n' : '')).join('');
+  }
+  return { text:out.trim(), pages:pdf.numPages };
+}
+async function pdfImages(buf, max = 40){
+  const lib = await pdfLib(); const pdf = await lib.getDocument({ data:new Uint8Array(buf), isEvalSupported:false }).promise; const out = [];
+  for (let i = 1; i <= Math.min(pdf.numPages, max); i++) {
+    const page = await pdf.getPage(i); const v0 = page.getViewport({ scale:1 }); const scale = Math.min(3, Math.sqrt(1.5e6 / (v0.width * v0.height)));
+    const vp = page.getViewport({ scale }); const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    await page.render({ canvasContext:c.getContext('2d'), viewport:vp }).promise;
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85)); out.push(b64.enc(await blob.arrayBuffer()));
+  }
+  return out;
 }
 
 // ——————————————————————————————————— Construction du contexte des agents
@@ -238,7 +293,13 @@ export function pickDocs({ title = 'Choisir des documents', multi = true, dossie
   });
 }
 
-export function go(hash){ if (location.hash === hash) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = hash; }
+// Navigation : par l'adresse (#/vue) dans l'application installée, en mémoire lorsqu'elle est ouverte dans Claude
+export const currentHash = () => ARTIFACT ? S.hash : location.hash;
+export function go(hash){
+  if (ARTIFACT) { S.hash = hash; window.dispatchEvent(new Event('lexia:route')); return; }
+  if (location.hash === hash) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = hash;
+}
+export function setHash(hash){ if (ARTIFACT) S.hash = hash; else history.replaceState(null, '', hash); }
 export function setActions(html){ const t = $('#topAct'); if (t) t.innerHTML = html; return t; }
 
 export function sanitizeForCompare(s){ return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }

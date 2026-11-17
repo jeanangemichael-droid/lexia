@@ -1,7 +1,7 @@
 // LEXIA — Service worker : application hors ligne, mises à jour, réception de fichiers partagés (Android)
-const VERSION = 'lexia-1.0.0';
+const VERSION = 'lexia-1.1.0';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'core.js', 'vault.js', 'knowledge.js', 'llm.js', 'privacy.js', 'search.js', 'office.js',
-  'v_chat.js', 'v_auto.js', 'v_docs.js', 'v_dossiers.js', 'v_more.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png'];
+  'v_chat.js', 'v_auto.js', 'v_docs.js', 'v_dossiers.js', 'v_more.js', 'platform.js', 'pdf.min.js', 'pdf.worker.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL))); });
 self.addEventListener('activate', e => {

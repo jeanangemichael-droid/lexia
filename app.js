@@ -1,5 +1,5 @@
 // LEXIA — Démarrage, verrouillage, coque de l'application, navigation
-import { V, S, $, $$, h, icon, toast, esc, settings, saveSettings, seedIfEmpty, audit, importFiles } from './core.js';
+import { V, S, $, $$, h, icon, toast, esc, settings, saveSettings, seedIfEmpty, audit, importFiles, ARTIFACT, engineReady, engineHint, currentHash, go, promptBox } from './core.js';
 import { passStrength } from './vault.js';
 import { APP_VERSION } from './knowledge.js';
 import { viewChat } from './v_chat.js';
@@ -14,7 +14,7 @@ const NAV = [
   ['memory','Mémoire et veille','brain',viewMemory], ['bench','Banc d\'essai','gauge',viewBench], ['settings','Paramètres et sécurité','gear',viewSettings],
 ];
 const BOTTOM = [['chat','Assistant'],['auto','Automatiser'],['docs','Documents'],['dossiers','Dossiers']];
-let lastActive = Date.now(), hiddenAt = 0;
+let lastActive = Date.now(), hiddenAt = 0, bound = false;
 
 // ——————————————————————————————————— Démarrage
 async function boot(){
@@ -22,7 +22,7 @@ async function boot(){
   try { localStorage.getItem('lexia-theme') === 'light' && (document.documentElement.dataset.theme = 'light'); } catch {}
   const exists = await V.open();
   exists ? showUnlock() : showSetup();
-  if ('serviceWorker' in navigator) registerSW();
+  if (!ARTIFACT && 'serviceWorker' in navigator) registerSW();
 }
 
 function strengthMeter(input, meter){
@@ -37,7 +37,7 @@ function showSetup(){
       <label class="f">Phrase secrète (12 caractères minimum, idéalement une phrase)</label><input type="password" id="p1" autocomplete="new-password">
       <div class="meter" id="m1"></div>
       <label class="f">Confirmer la phrase secrète</label><input type="password" id="p2" autocomplete="new-password">
-      <label class="f">Clé API Anthropic (facultatif maintenant, modifiable plus tard)</label><input type="password" id="k" placeholder="sk-ant-…" autocomplete="off">
+      ${ARTIFACT ? `<div class="banner" style="margin-top:12px">LEXIA est ouvert dans Claude : les agents utilisent <b>votre abonnement Claude</b>, sans clé API ni frais supplémentaires. Les données chiffrées sont conservées dans votre espace privé Claude, accessible depuis tous vos appareils.</div>` : `<label class="f">Clé API Anthropic (facultatif maintenant, modifiable plus tard)</label><input type="password" id="k" placeholder="sk-ant-…" autocomplete="off">`}
       <button class="btn pri" id="go" style="width:100%;justify-content:center;margin-top:16px">${icon('lock')} Créer le coffre chiffré</button>
       <p class="tiny dim" style="margin-top:12px">Restauration : <label style="color:var(--gold2);cursor:pointer;text-decoration:underline">importer une sauvegarde .lexia<input type="file" id="rb" hidden accept=".lexia,application/json,application/octet-stream"></label></p>
     </div><p class="tiny dim" style="text-align:center">Version ${APP_VERSION}</p></div></div>`;
@@ -49,7 +49,7 @@ function showSetup(){
     if (p1 !== p2) return toast('Les deux saisies ne correspondent pas.', 'err');
     $('#go').disabled = true; $('#go').innerHTML = '<span class="spin"></span> Dérivation de la clé…';
     await V.setup(p1); await seedIfEmpty();
-    const k = $('#k').value.trim(); if (k) await saveSettings({ apiKey:k });
+    const k = $('#k')?.value.trim(); if (k) await saveSettings({ apiKey:k });
     await audit('Création du coffre'); enterApp();
   };
   $('#rb').onchange = e => restoreBackup(e.target.files[0]);
@@ -68,7 +68,7 @@ function restoreBackup(file){
 function showUnlock(){
   const fails = V.meta?.fails || 0;
   $('#app').innerHTML = `<div id="lock"><div class="box">
-    <div class="logo">${icon('scale')}<b>LEXIA</b><span class="mut">Coffre-fort verrouillé</span></div>
+    <div class="logo">${icon('scale')}<b>LEXIA</b><span class="mut">Coffre-fort verrouillé${V.storage ? ' · stockage : ' + esc(V.storage) : ''}</span></div>
     <div class="card"><label class="f">Phrase secrète</label><input type="password" id="pp" autocomplete="current-password">
     <button class="btn pri" id="ok" style="width:100%;justify-content:center;margin-top:14px">${icon('lock')} Déverrouiller</button>
     <p class="tiny dim" id="fl">${fails ? `${fails} tentative(s) échouée(s).` : ''}${V.meta?.wipeAfter ? ` Effacement automatique après ${V.meta.wipeAfter} échecs.` : ''}</p>
@@ -81,13 +81,13 @@ function showUnlock(){
     $('#ok').disabled = true; $('#ok').innerHTML = '<span class="spin"></span> Vérification…';
     const ok = await V.unlock(pp.value);
     if (!ok) {
-      if (m.wipeAfter && m.fails >= m.wipeAfter) { await V.wipe(); toast('Nombre maximal d\'échecs atteint : coffre effacé.', 'err'); return setTimeout(() => location.reload(), 1500); }
+      if (m.wipeAfter && m.fails >= m.wipeAfter) { await V.wipe(); toast('Nombre maximal d\'échecs atteint : coffre effacé.', 'err'); await V.open(); return showSetup(); }
       $('#ok').disabled = false; $('#ok').innerHTML = `${icon('lock')} Déverrouiller`; $('#fl').textContent = `${m.fails} tentative(s) échouée(s).`; pp.value = ''; return toast('Phrase secrète incorrecte.', 'err');
     }
     await seedIfEmpty(); await audit('Déverrouillage'); enterApp();
   };
   $('#ok').onclick = go; pp.onkeydown = e => { if (e.key === 'Enter') go(); };
-  $('#wipe').onclick = async () => { if (prompt('Tapez EFFACER pour supprimer définitivement toutes les données de cet appareil') === 'EFFACER') { await V.wipe(); location.reload(); } };
+  $('#wipe').onclick = async () => { if ((await promptBox('Effacer toutes les données', 'Tapez EFFACER pour supprimer définitivement le coffre')) === 'EFFACER') { await V.wipe(); await V.open(); showSetup(); } };
   $('#rb').onchange = e => restoreBackup(e.target.files[0]);
 }
 
@@ -106,17 +106,22 @@ function enterApp(){
   $('#menuBtn').onclick = () => toggle(true); $('#moreBtn').onclick = () => toggle(true); scrim.onclick = () => toggle(false);
   $$('#side .nav').forEach(a => a.addEventListener('click', () => toggle(false)));
   $('#lockBtn').onclick = lockNow;
-  window.addEventListener('hashchange', route);
-  ['pointerdown','keydown','touchstart'].forEach(e => document.addEventListener(e, () => { lastActive = Date.now(); }, { passive:true }));
-  setInterval(checkLock, 15000);
+  if (!bound) {
+    bound = true;
+    window.addEventListener('hashchange', route); window.addEventListener('lexia:route', route);
+    if (ARTIFACT) document.addEventListener('click', e => { const a = e.target.closest('a[href^="#/"]'); if (a) { e.preventDefault(); go(a.getAttribute('href')); } });
+    ['pointerdown','keydown','touchstart'].forEach(e => document.addEventListener(e, () => { lastActive = Date.now(); }, { passive:true }));
+    setInterval(checkLock, 15000);
+  }
+  lastActive = Date.now();
   route();
-  importShared();
-  if (!st.apiKey && st.endpoint !== 'proxy') toast('Configurez votre clé API dans Paramètres pour activer les agents.');
+  if (!ARTIFACT) importShared();
+  if (!engineReady(st)) toast(engineHint());
 }
 
 export function route(){
   if (!V.unlocked) return;
-  const [, id = 'chat', param = null] = location.hash.split('/');
+  const [, id = 'chat', param = null] = currentHash().split('/');
   const n = NAV.find(x => x[0] === id) || NAV[0];
   S.route = n[0]; S.param = param ? decodeURIComponent(param) : null;
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === n[0]));
@@ -132,7 +137,8 @@ export function updateCounts(){
 
 // ——————————————————————————————————— Verrouillage automatique et écran de confidentialité
 function checkLock(){ const m = settings().autolock; if (m > 0 && V.unlocked && Date.now() - lastActive > m * 60000 && !S.busy) lockNow(); }
-export async function lockNow(){ if (V.unlocked) { try { await audit('Verrouillage'); } catch {} } V.lock(); location.hash = ''; location.reload(); }
+export async function restart(){ V.lock(); S.hash = ''; S.idx = null; S.idxDirty = true; if (!ARTIFACT) { location.hash = ''; return location.reload(); } (await V.open()) ? showUnlock() : showSetup(); }
+export async function lockNow(){ if (V.unlocked) { try { await audit('Verrouillage'); } catch {} } V.lock(); S.idx = null; S.idxDirty = true; if (ARTIFACT) { S.hash = ''; return showUnlock(); } location.hash = ''; location.reload(); }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); document.body.classList.add('veil'); }
   else { document.body.classList.remove('veil'); if (V.unlocked && hiddenAt) { const m = settings().autolock; if (m > 0 && Date.now() - hiddenAt > m * 60000 && !S.busy) lockNow(); } }
