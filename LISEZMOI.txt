@@ -1,0 +1,10 @@
+LEXIA 1.0.0 — Cabinet d'agents juridiques IA (OHADA · UEMOA · CIMA · Côte d'Ivoire)
+
+Installation rapide (détails dans le guide Word) :
+1. Publiez tous les fichiers de ce dossier (sauf serveur-cabinet) sur un hébergement HTTPS,
+   par exemple GitHub Pages (gratuit, faisable depuis un téléphone).
+2. Ouvrez l'adresse dans Chrome (Android) ou Chrome/Edge (ordinateur) → « Installer l'application ».
+3. Créez votre phrase secrète, collez votre clé API Anthropic, testez la connexion.
+
+Aucune dépendance externe, aucun traceur. Toutes les données sont chiffrées (AES-256) sur l'appareil.
+Le dossier serveur-cabinet contient le serveur dédié facultatif pour une équipe (Node.js 18+).
