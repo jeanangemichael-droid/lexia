@@ -1,6 +1,6 @@
 // LEXIA — Automatisation juridique : parcours guidés de rédaction, d'analyse, de révision et de contentieux
 import { V, S, $, $$, h, icon, toast, esc, settings, saveSettings, agentById, avatar, AGENTS, pseudonymizer, buildSystem, docBlocks,
-  runAgent, verifyAnswer, pickDocs, fmtDate, go, setActions, today, engineReady, engineHint } from './core.js';
+  runAgent, verifyAnswer, pickDocs, fmtDate, go, setActions, today } from './core.js';
 import { WORKFLOWS, CONTRACTS, REGULATIONS } from './knowledge.js';
 import { mdToHtml, mdToDocx, toCsv, toIcs, download, fileSafe } from './office.js';
 import { parseJsonLoose } from './llm.js';
@@ -37,7 +37,7 @@ function form(view, wf){
       <div><label class="f">Agent responsable</label><select id="ag">${AGENTS.map(a => `<option value="${a.id}">${esc(a.name)} — ${esc(a.title)}</option>`).join('')}</select></div>
       <div><label class="f">Dossier (contexte et pseudonymisation)</label><select id="dos"><option value="">Aucun</option>${dossiers.map(d => `<option value="${d.id}">${esc(d.title)}</option>`).join('')}</select></div>
     </div>
-    <div class="row" style="margin-top:12px"><label class="switch ${st.opts.deep ? 'on' : ''}" id="deep">${icon('bolt')}Profondeur max</label><label class="switch ${st.opts.verify ? 'on' : ''}" id="ver">${icon('shield')}Relecture contradictoire</label><label class="switch ${st.opts.web ? 'on' : ''} ${st.endpoint === 'claude' ? 'hidden' : ''}" id="web">${icon('globe')}Web</label>
+    <div class="row" style="margin-top:12px"><label class="switch ${st.opts.deep ? 'on' : ''}" id="deep">${icon('bolt')}Profondeur max</label><label class="switch ${st.opts.verify ? 'on' : ''}" id="ver">${icon('shield')}Relecture contradictoire</label><label class="switch ${st.opts.web ? 'on' : ''}" id="web">${icon('globe')}Web</label>
     <span class="grow"></span><button class="btn pri" id="run">${icon('bolt')}Lancer</button></div></div>
     <div class="result" id="res"></div>`;
   const sw = id => { const e = $('#' + id); e.onclick = () => e.classList.toggle('on'); };
@@ -55,7 +55,7 @@ function form(view, wf){
 
 async function run(wf, state){
   const st = settings();
-  if (!engineReady(st)) return toast(engineHint(), 'err');
+  if (!st.apiKey && st.endpoint !== 'proxy') return toast('Configurez la clé API dans Paramètres.', 'err');
   const v = {}; $$('[data-f]').forEach(e => v[e.dataset.f] = e.value.trim());
   v.regs = $$('[data-chk]:checked').map(c => c.value).join(', ') || 'l\'ensemble des réglementations applicables';
   if (v.ctype) { const c = CONTRACTS.find(x => x[0] === v.ctype); v.ctypeLabel = c[1]; v.ctypeBasis = c[2]; }

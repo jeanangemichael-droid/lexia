@@ -1,6 +1,6 @@
 // LEXIA — Assistant IA : agents spécialisés, conseil d'experts, corpus, relecture contradictoire
 import { V, S, $, $$, h, icon, toast, modal, esc, settings, saveSettings, agentById, avatar, AGENTS, routeAgent, pseudonymizer, buildSystem,
-  docBlocks, corpusBlock, runAgent, verifyAnswer, pickDocs, docByNum, fmtDate, go, setActions, importFiles, setHash, engineReady, engineHint, ARTIFACT } from './core.js';
+  docBlocks, corpusBlock, runAgent, verifyAnswer, pickDocs, docByNum, fmtDate, go, setActions, importFiles } from './core.js';
 import { mdToHtml, mdToDocx, download, fileSafe } from './office.js';
 
 const C = { convo:null, agents:['auto'], council:false, dossierId:null, attach:[], abort:null };
@@ -28,7 +28,8 @@ export function viewChat(view, param){
       <button class="switch ${C.council ? 'on' : ''}" id="council" title="Plusieurs experts répondent puis l'associé coordinateur synthétise">${icon('users')}Conseil d'experts</button>
       ${sw('corpus','Corpus','search','Recherche automatique dans vos documents')}
       ${sw('verify','Relecture','shield','Relecture contradictoire par un second agent (Argus)')}
-      ${st.endpoint === 'claude' ? '' : sw('web','Web','globe','Recherche en ligne pendant la réponse') + sw('webOfficial','Sources officielles','check','Limiter la recherche web aux sites officiels')}
+      ${sw('web','Web','globe','Recherche en ligne pendant la réponse')}
+      ${sw('webOfficial','Sources officielles','check','Limiter la recherche web aux sites officiels')}
       ${sw('deep','Profondeur max','bolt','Utiliser le modèle le plus puissant')}
       ${sw('thinking','Réflexion','brain','Raisonnement étendu avant de répondre')}
       <button class="switch ${st.pseudo ? 'on' : ''}" id="pseudo" title="Pseudonymiser noms, téléphones, e-mails avant envoi">${icon('eye')}Pseudonymisation</button>
@@ -38,7 +39,7 @@ export function viewChat(view, param){
       <textarea id="q" rows="2"></textarea>
       <div class="bar"><button class="ibtn" id="clip" title="Joindre des documents">${icon('clip')}</button>
       <label class="ibtn" title="Photographier un document">${icon('camera')}<input type="file" accept="image/*" capture="environment" hidden id="cam"></label>
-      <button class="ibtn ${ARTIFACT ? 'hidden' : ''}" id="mic" title="Dicter">${icon('mic')}</button><span class="grow tiny dim" id="hint"></span>
+      <button class="ibtn" id="mic" title="Dicter">${icon('mic')}</button><span class="grow tiny dim" id="hint"></span>
       <button class="btn pri sm" id="send">${icon('send')}Envoyer</button></div></div></div>
   </div>`;
   setActions(`<button class="btn sm" id="newc">${icon('plus')}<span>Nouvelle</span></button><button class="ibtn" id="expc" title="Exporter la conversation en Word">${icon('word')}</button>`);
@@ -83,7 +84,7 @@ function drawAtt(){
 
 function welcome(){
   const st = settings(); const lastRun = Math.max(0, ...V.all('runs').map(r => r.created));
-  const warn = !engineReady(st) ? `<div class="banner red">${esc(engineHint())} <a href="#/settings">Ouvrir les paramètres</a></div>` : st.endpoint === 'claude' ? '<div class="banner">Mode abonnement Claude : les agents utilisent votre forfait Claude, sans clé API. À la première question, Claude vous demande d\'autoriser LEXIA.</div>' : '';
+  const warn = !st.apiKey && st.endpoint !== 'proxy' ? `<div class="banner red">Aucune clé API : ouvrez <a href="#/settings">Paramètres et sécurité</a> pour activer les agents.</div>` : '';
   const bench = Date.now() - Math.max(lastRun, V.meta?.created || 0) > 7 * 864e5 ? `<div class="banner">Le test de performance hebdomadaire n'a pas été lancé depuis plus de 7 jours. <a href="#/bench">Lancer le banc d'essai</a></div>` : '';
   return `<div class="welcome">${warn}${bench}<h1>Votre équipe d'agents juridiques</h1>
     <p class="mut">Quinze agents spécialisés en droit OHADA, communautaire et ivoirien travaillent sous vos ordres. Chaque réponse cite les articles utilisés et un niveau de certitude ; c'est vous qui gardez la décision.</p>
@@ -153,12 +154,12 @@ function correct(m){
 async function send(){
   const q = $('#q'); const text = q.value.trim(); if (!text) return;
   const st = settings();
-  if (!engineReady(st)) { toast(engineHint(), 'err'); return; }
+  if (!st.apiKey && st.endpoint !== 'proxy') { toast('Configurez d\'abord la clé API (Paramètres).', 'err'); return; }
   if (C.council && C.agents.length < 2) { toast('Choisissez au moins deux experts pour le conseil.', 'err'); return; }
   if (!C.convo) C.convo = { title:text.slice(0, 70), messages:[], created:Date.now(), dossierId:C.dossierId, agents:[...C.agents], council:C.council };
   const userMsg = { role:'user', text, attach:[...C.attach], ts:Date.now() };
   C.convo.messages.push(userMsg); C.attach = []; drawAtt(); q.value = ''; q.style.height = '';
-  await V.put('convos', C.convo); setHash('#/chat/' + C.convo.id);
+  await V.put('convos', C.convo); history.replaceState(null, '', '#/chat/' + C.convo.id);
   drawMsgs();
 
   const pseudo = pseudonymizer(st.pseudo);

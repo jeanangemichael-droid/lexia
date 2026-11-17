@@ -1,7 +1,7 @@
 // LEXIA — Base de connaissances : agents, parcours, catalogue, modèles, tests
 // Les références marquées "à vérifier" doivent être contrôlées sur la source officielle.
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.0.0';
 
 export const CERTITUDE = `Niveaux de certitude à afficher après chaque affirmation importante (article, taux, délai, montant, juridiction) :
 - [Vérifié] : lu dans un extrait du corpus fourni ([DOC n]), dans une leçon validée du cabinet, ou dans une source web officielle consultée pendant cette réponse (citer l'URL).

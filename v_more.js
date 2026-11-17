@@ -1,6 +1,6 @@
 // LEXIA — Historique, mémoire d'apprentissage et veille, banc d'essai, paramètres et sécurité
 import { V, S, $, $$, h, icon, toast, modal, esc, settings, saveSettings, agentById, avatar, AGENTS, fmtDate, go, setActions, confirmBox,
-  pseudonymizer, buildSystem, runAgent, pickDocs, audit, today, sanitizeForCompare, engineReady, engineHint, promptBox, ARTIFACT } from './core.js';
+  pseudonymizer, buildSystem, runAgent, pickDocs, audit, today, sanitizeForCompare } from './core.js';
 import { APP_VERSION, REFUSAL_MARKERS, OFFICIAL_DOMAINS } from './knowledge.js';
 import { MODELS } from './llm.js';
 import { passStrength } from './vault.js';
@@ -76,7 +76,7 @@ export function viewBench(view){
   $('#at').onclick = () => editTest({ expect:[] });
   $$('[data-t]', view).forEach(e => e.onclick = () => editTest(V.get('tests', e.dataset.t)));
   $('#go').onclick = async () => {
-    if (!engineReady(st)) return toast(engineHint(), 'err');
+    if (!st.apiKey && st.endpoint !== 'proxy') return toast('Clé API requise', 'err');
     const model = $('#bm').value; const results = []; $('#go').disabled = true; S.busy = true;
     for (const [i, t] of tests.entries()) {
       $('#bp').textContent = `Test ${i + 1}/${tests.length}…`; const ag = agentById(t.agent || 'auto'); let ans = '', err = '';
@@ -121,8 +121,7 @@ export function viewSettings(view){
 
   if (tab === 'ia') {
     sb.innerHTML = `<div class="card">
-      <label class="f">Mode de connexion</label><select id="ep"><option value="claude" ${st.endpoint === 'claude' ? 'selected' : ''}>Abonnement Claude — sans clé API (LEXIA ouvert dans Claude)</option><option value="direct" ${st.endpoint === 'direct' ? 'selected' : ''}>Direct — clé API personnelle (chiffrée sur l'appareil)</option><option value="proxy" ${st.endpoint === 'proxy' ? 'selected' : ''}>Serveur dédié du cabinet (la clé reste sur le serveur)</option></select>
-      <div id="sub" class="banner" style="margin-top:10px">${ARTIFACT ? 'Les agents utilisent votre abonnement Claude (Pro ou supérieur) : aucune clé API, aucun frais supplémentaire. Les requêtes comptent dans les limites d\'utilisation de votre forfait. La recherche web et l\'envoi direct de PDF ne sont pas disponibles dans ce mode (les PDF sont lus sur l\'appareil).' : 'Ce mode ne fonctionne que lorsque LEXIA est ouvert depuis Claude (claude.ai ou application Claude). Ici, utilisez une clé API ou le serveur du cabinet.'}</div>
+      <label class="f">Mode de connexion</label><select id="ep"><option value="direct" ${st.endpoint === 'direct' ? 'selected' : ''}>Direct — clé API personnelle (chiffrée sur l'appareil)</option><option value="proxy" ${st.endpoint === 'proxy' ? 'selected' : ''}>Serveur dédié du cabinet (la clé reste sur le serveur)</option></select>
       <div id="dir"><label class="f">Clé API Anthropic</label><div class="row"><input type="password" id="key" value="${esc(st.apiKey)}" placeholder="sk-ant-…" style="flex:1"><button class="btn sm" id="sk">${icon('eye')}</button></div>
         <p class="tiny dim">Obtenez une clé sur console.anthropic.com → API Keys. Elle est chiffrée (AES-256) avec le reste du coffre et n'est envoyée qu'à api.anthropic.com.</p></div>
       <div id="prx"><label class="f">Adresse du serveur du cabinet</label><input type="url" id="purl" value="${esc(st.proxyUrl)}" placeholder="https://lexia.moncabinet.ci"><label class="f">Jeton d'accès personnel</label><input type="password" id="ptok" value="${esc(st.proxyToken)}"></div>
@@ -132,7 +131,7 @@ export function viewSettings(view){
       <label class="chk" style="margin-top:12px"><input type="checkbox" id="ai" ${st.autoIndex ? 'checked' : ''}><span class="small">Indexer automatiquement (OCR IA) les PDF et photos importés</span></label>
       <label class="chk"><input type="checkbox" id="pt" ${st.pdfAsText ? 'checked' : ''}><span class="small">Envoyer les PDF déjà transcrits sous forme de texte (permet la pseudonymisation, réduit le coût)</span></label>
       <div class="row" style="margin-top:14px"><button class="btn pri" id="sv">${icon('save')}Enregistrer</button><button class="btn" id="tst">${icon('bolt')}Tester la connexion</button><span class="small" id="tr"></span></div></div>`;
-    const sync = () => { const v = $('#ep').value; $('#dir').classList.toggle('hidden', v !== 'direct'); $('#prx').classList.toggle('hidden', v !== 'proxy'); $('#sub').classList.toggle('hidden', v !== 'claude'); };
+    const sync = () => { const p = $('#ep').value === 'proxy'; $('#dir').classList.toggle('hidden', p); $('#prx').classList.toggle('hidden', !p); };
     $('#ep').onchange = sync; sync();
     $('#sk').onclick = () => { const k = $('#key'); k.type = k.type === 'password' ? 'text' : 'password'; };
     const collect = () => ({ endpoint:$('#ep').value, apiKey:$('#key').value.trim(), proxyUrl:$('#purl').value.trim(), proxyToken:$('#ptok').value.trim(), model:$('#m1').value, modelDeep:$('#m2').value, modelFast:$('#m3').value, maxTokens:Math.max(1000, +$('#mt').value || 8000), autoIndex:$('#ai').checked, pdfAsText:$('#pt').checked });
@@ -143,7 +142,7 @@ export function viewSettings(view){
   }
 
   if (tab === 'sec') {
-    sb.innerHTML = `<div class="card"><h3>Chiffrement</h3><p class="small mut">AES-GCM 256 bits ; clé dérivée de votre phrase secrète par PBKDF2-SHA256 (${V.meta.iter.toLocaleString('fr-FR')} itérations). Aucune donnée n'est stockée en clair ni envoyée à un serveur LEXIA (il n'en existe pas). Stockage actuel : <b>${esc(V.storage)}</b>.</p>
+    sb.innerHTML = `<div class="card"><h3>Chiffrement</h3><p class="small mut">AES-GCM 256 bits ; clé dérivée de votre phrase secrète par PBKDF2-SHA256 (${V.meta.iter.toLocaleString('fr-FR')} itérations). Aucune donnée n'est stockée en clair ni envoyée à un serveur LEXIA (il n'en existe pas).</p>
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px"><div><label class="f">Verrouillage automatique après inactivité</label><select id="al">${[[1,'1 minute'],[3,'3 minutes'],[5,'5 minutes'],[15,'15 minutes'],[30,'30 minutes'],[0,'Jamais (déconseillé)']].map(([v, l]) => `<option value="${v}" ${v === st.autolock ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label class="f">Effacement après échecs de déverrouillage</label><select id="wa">${[[0,'Désactivé'],[5,'5 échecs'],[10,'10 échecs'],[20,'20 échecs']].map(([v, l]) => `<option value="${v}" ${v === (V.meta.wipeAfter || 0) ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
       <button class="btn sm pri" id="ss" style="margin-top:10px">${icon('save')}Enregistrer</button></div>
@@ -154,13 +153,13 @@ export function viewSettings(view){
       <div class="card" style="margin-top:12px"><h3>Sauvegarde chiffrée</h3><p class="small mut">Le fichier .lexia reste chiffré : il ne peut être relu qu'avec votre phrase secrète. Conservez-le sur un support séparé.</p>
       <div class="row"><button class="btn" id="bk">${icon('download')}Exporter la sauvegarde</button><label class="btn">${icon('upload')}Restaurer<input type="file" id="rs" hidden></label></div></div>
       <div class="card" style="margin-top:12px;border-color:var(--bad)"><h3 style="color:var(--bad)">Effacement d'urgence</h3><p class="small mut">Supprime immédiatement et définitivement toutes les données de cet appareil.</p><button class="btn danger" id="wp">${icon('trash')}Tout effacer</button></div>`;
-    $('#ss').onclick = async () => { await saveSettings({ autolock:+$('#al').value }); V.meta.wipeAfter = +$('#wa').value; await V.saveMeta(); await audit('Paramètres de sécurité modifiés'); toast('Enregistré', 'ok'); };
+    $('#ss').onclick = async () => { await saveSettings({ autolock:+$('#al').value }); V.meta.wipeAfter = +$('#wa').value; const db = V.db; await new Promise(r => { const t = db.transaction('meta', 'readwrite'); t.objectStore('meta').put(V.meta); t.oncomplete = r; }); await audit('Paramètres de sécurité modifiés'); toast('Enregistré', 'ok'); };
     $('#sp').onclick = async () => { await saveSettings({ pseudo:$('#ps').checked, confTerms:$('#ct').value }); toast('Enregistré', 'ok'); };
     $('#cp').onclick = async () => { const n1 = $('#n1').value; if (n1.length < 12 || passStrength(n1) < 2) return toast('Nouvelle phrase trop faible (12 caractères minimum)', 'err'); if (n1 !== $('#n2').value) return toast('Confirmation différente', 'err');
       $('#cp').disabled = true; const ok = await V.changePass($('#o').value, n1); $('#cp').disabled = false; if (!ok) return toast('Phrase actuelle incorrecte', 'err'); await audit('Phrase secrète modifiée'); toast('Phrase secrète modifiée', 'ok'); ['o','n1','n2'].forEach(i => $('#' + i).value = ''); };
-    $('#bk').onclick = async () => { download(await V.exportBackup(), `lexia_sauvegarde_${today()}.${ARTIFACT ? 'json' : 'lexia'}`); await audit('Export sauvegarde'); };
-    $('#rs').onchange = async e => { const f = e.target.files[0]; if (!f) return; const p = await promptBox('Restaurer une sauvegarde', 'Phrase secrète de la sauvegarde'); if (!p) return; try { await V.importBackup(await f.text(), p); toast('Restauré. Déverrouillez à nouveau.', 'ok'); setTimeout(() => import('./app.js').then(m => m.restart()), 1200); } catch (err) { toast(err.message, 'err'); } };
-    $('#wp').onclick = async () => { if ((await promptBox('Effacement d\'urgence', 'Tapez EFFACER pour confirmer la suppression définitive')) !== 'EFFACER') return; await V.wipe(); toast('Toutes les données ont été effacées.', 'ok'); setTimeout(() => import('./app.js').then(m => m.restart()), 800); };
+    $('#bk').onclick = async () => { download(await V.exportBackup(), `lexia_sauvegarde_${today()}.lexia`); await audit('Export sauvegarde'); };
+    $('#rs').onchange = async e => { const f = e.target.files[0]; if (!f) return; const p = prompt('Phrase secrète de la sauvegarde'); if (!p) return; try { await V.importBackup(await f.text(), p); toast('Restauré. Déverrouillez à nouveau.', 'ok'); setTimeout(() => location.reload(), 1200); } catch (err) { toast(err.message, 'err'); } };
+    $('#wp').onclick = async () => { if (prompt('Tapez EFFACER pour confirmer la suppression définitive') !== 'EFFACER') return; await V.wipe(); location.reload(); };
   }
 
   if (tab === 'cab') {
@@ -204,13 +203,13 @@ export function viewSettings(view){
     const standalone = matchMedia('(display-mode: standalone)').matches;
     sb.innerHTML = `<div class="card"><h3>LEXIA ${APP_VERSION}</h3><p class="small mut">Application installable (PWA) : Android, Windows, macOS, Linux, ChromeOS. Fonctionne hors ligne pour la consultation de vos données ; les agents nécessitent une connexion.</p>
       <p class="small">${standalone ? '<span class="tag green">Installée</span>' : '<span class="tag">Non installée</span>'}</p>
-      ${!standalone && !ARTIFACT ? `<button class="btn pri" id="inst">${icon('download')}Installer l'application</button><p class="tiny dim">Sinon : menu du navigateur ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>` : ''}
+      ${!standalone ? `<button class="btn pri" id="inst">${icon('download')}Installer l'application</button><p class="tiny dim">Sinon : menu du navigateur ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>` : ''}
       <label class="f">Thème</label><select id="th" style="width:auto"><option value="dark" ${st.theme === 'dark' ? 'selected' : ''}>Sombre</option><option value="light" ${st.theme === 'light' ? 'selected' : ''}>Clair</option></select>
       <div class="row" style="margin-top:12px"><button class="btn" id="upd">${icon('refresh')}Rechercher une mise à jour</button></div>
       <h3 style="margin-top:18px">Sources officielles prioritaires (recherche web)</h3><p class="tiny dim">${OFFICIAL_DOMAINS.map(esc).join(' · ')}</p>
       <h3 style="margin-top:18px">Avertissement</h3><p class="small mut">LEXIA est un outil d'aide à la recherche et à la rédaction. Les réponses peuvent contenir des erreurs : vérifiez chaque référence sur la source officielle. La décision et la responsabilité professionnelles restent celles du juriste ou de l'avocat.</p></div>`;
     $('#inst') && ($('#inst').onclick = async () => { if (S.installPrompt) { S.installPrompt.prompt(); } else toast('Utilisez le menu du navigateur : « Installer l\'application » ou « Ajouter à l\'écran d\'accueil ».'); });
     $('#th').onchange = async e => { await saveSettings({ theme:e.target.value }); document.documentElement.dataset.theme = e.target.value; try { localStorage.setItem('lexia-theme', e.target.value); } catch {} };
-    $('#upd').onclick = async () => { if (ARTIFACT) return toast('Ouvert dans Claude : la dernière version publiée est toujours chargée.'); const r = await navigator.serviceWorker?.getRegistration(); if (r) { await r.update(); toast(r.waiting || r.installing ? 'Mise à jour trouvée' : 'Vous disposez de la dernière version'); } };
+    $('#upd').onclick = async () => { const r = await navigator.serviceWorker?.getRegistration(); if (r) { await r.update(); toast(r.waiting || r.installing ? 'Mise à jour trouvée' : 'Vous disposez de la dernière version'); } };
   }
 }

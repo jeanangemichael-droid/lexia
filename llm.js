@@ -1,6 +1,4 @@
-// LEXIA — Client du modèle : API Anthropic (clé personnelle ou serveur du cabinet) ou abonnement Claude (page ouverte dans Claude)
-import { cap } from './platform.js';
-import { b64 } from './vault.js';
+// LEXIA — Client du modèle (API Anthropic Messages, flux SSE), direct ou via le serveur du cabinet
 
 export const MODELS = [
   ['claude-opus-5-5', 'Claude Opus 5.5 — profondeur maximale'],
@@ -18,52 +16,7 @@ const ERR = {
   500: 'Erreur du service d\'IA.', 529: 'Service d\'IA surchargé.',
 };
 
-export async function complete(args){
-  if (args.settings.endpoint === 'claude') return completeViaSubscription(args);
-  return completeViaApi(args);
-}
-
-// ——— Abonnement Claude : la requête est exécutée sur le compte Claude de l'utilisateur (aucune clé API)
-const SUB_ERR = {
-  not_granted:'Autorisez LEXIA à utiliser Claude (fenêtre de confirmation), puis réessayez.',
-  sampling_disabled:'Claude n\'est pas disponible pour ce compte depuis une page.',
-  rate_limited:'Limite d\'utilisation de votre abonnement atteinte ou trop de requêtes simultanées : réessayez un peu plus tard.',
-  prompt_too_large:'Contenu trop volumineux : joignez moins de documents ou des extraits.',
-  session_expired:'Session Claude expirée : reconnectez-vous.',
-  refused:'Claude a refusé cette demande ; reformulez-la.',
-  empty_completion:'Aucune réponse produite ; simplifiez la demande.',
-  images_unavailable:'L\'envoi d\'images n\'est pas disponible ici.', image_rejected:'Image refusée (format ou taille).',
-  upstream_error:'Service momentanément indisponible ; réessayez.',
-};
-const tierOf = m => /opus/i.test(m || '') ? 'complex' : /haiku/i.test(m || '') ? 'quick' : 'default';
-async function completeViaSubscription({ system, messages, model, thinking = false, web = false, onText, onStatus, signal }){
-  const sample = await cap('sample');
-  if (!sample) throw new Error('Le mode « Abonnement Claude » ne fonctionne que lorsque LEXIA est ouvert dans Claude (claude.ai ou application Claude). Ailleurs, choisissez une clé API dans Paramètres.');
-  if (web) onStatus?.('Recherche web non disponible en mode abonnement : réponse fondée sur les connaissances et votre corpus.');
-  const turns = [{ role:'user', content:`<consignes_systeme>\n${system}\n</consignes_systeme>\nApplique strictement ces consignes à toute la conversation qui suit.` }];
-  let images = [];
-  messages.forEach((m, i) => {
-    const last = i === messages.length - 1; let text = '';
-    if (typeof m.content === 'string') text = m.content;
-    else for (const b of m.content) {
-      if (b.type === 'text') text += (text ? '\n\n' : '') + b.text;
-      else if (b.type === 'image') { if (last) { const u = b64.dec(b.source.data); images.push(new Blob([u], { type:b.source.media_type || 'image/jpeg' })); text += `\n[Image ${images.length} jointe]`; } else text += '\n[Image jointe précédemment]'; }
-      else if (b.type === 'document') throw new Error('Un PDF non transcrit ne peut pas être transmis en mode abonnement : ouvrez-le dans Mes documents et lancez « Indexer ».');
-    }
-    turns.push({ role:m.role, content:text || '…' });
-  });
-  if (images.length) { const lim = await sample.limits().catch(() => null); const max = lim?.images?.maxCount || 0; if (!max) throw new Error(SUB_ERR.images_unavailable); images = images.slice(0, max); }
-  const est = s => Math.round(s.length / 4); const inTok = est(turns.map(t => t.content).join(''));
-  try {
-    const r = await sample(turns, { cache:false, signal, modelTier:tierOf(model), ...(thinking ? { effort:'high' } : {}), ...(images.length ? { images } : {}), onText: ({ text }) => onText?.(text) });
-    return { text:r.text, usage:{ in:inTok, out:est(r.text), cacheRead:0, cacheWrite:0 }, stop:r.truncated ? 'max_tokens' : 'end_turn', sources:[] };
-  } catch (e) {
-    if (e?.code === 'cancelled') { const a = new Error('Interrompu'); a.name = 'AbortError'; throw a; }
-    throw new Error(SUB_ERR[e?.code] || ('Erreur Claude : ' + (e?.message || e?.code || 'inconnue')));
-  }
-}
-
-async function completeViaApi({ settings, system, messages, model, maxTokens = 8000, web = false, webOfficial = false, thinking = false, onText, onStatus, signal, officialDomains = [] }){
+export async function complete({ settings, system, messages, model, maxTokens = 8000, web = false, webOfficial = false, thinking = false, onText, onStatus, signal, officialDomains = [] }){
   const proxy = settings.endpoint === 'proxy';
   const url = proxy ? (settings.proxyUrl || location.origin).replace(/\/$/, '') + '/v1/messages' : 'https://api.anthropic.com/v1/messages';
   const headers = { 'content-type':'application/json', 'anthropic-version':'2023-06-01' };

@@ -1,5 +1,4 @@
 // LEXIA — Rendu Markdown sécurisé, export Word (.docx natif), lecture .docx, CSV, agenda .ics
-import { ARTIFACT, cap } from './platform.js';
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
@@ -190,15 +189,7 @@ export function toIcs(events, cal = 'LEXIA'){
   return new Blob([`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LEXIA//Agents juridiques//FR\r\nX-WR-CALNAME:${e(cal)}\r\n${body}\r\nEND:VCALENDAR\r\n`], { type:'text/calendar;charset=utf-8' });
 }
 
-function notify(msg){ const t = document.createElement('div'); t.className = 'toast err'; t.textContent = msg; document.querySelector('#toasts')?.appendChild(t); setTimeout(() => t.remove(), 7000); }
-export async function download(blob, name){
-  if (ARTIFACT) {
-    const d = await cap('downloads');
-    if (!d) return notify('Le téléchargement n\'est pas disponible dans cette vue.');
-    try { await d.save({ filename:name, data:blob }); }
-    catch (e) { if (e?.code === 'declined') return; notify(e?.code === 'rejected_extension' ? `Le format de « ${name} » n'est pas autorisé dans Claude (utilisez la version installée depuis GitHub pour ce format).` : 'Téléchargement impossible : ' + (e?.message || e?.code || '')); }
-    return;
-  }
+export function download(blob, name){
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
